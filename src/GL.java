@@ -104,8 +104,8 @@ public class GL implements KeyListener
 		v3[3] = 1.0f; v3[4] = 1.0f; v3[5] = 0.0f; v3[6] = 0.0f; v3[7] = 1.0f;
 		v4[3] = 0.0f; v4[4] = 1.0f; v4[5] = 1.0f; v4[6] = 1.0f; v4[7] = 1.0f;
 		
-		Triangle t1 = new Triangle(v1, v2, v3);
-		Triangle t2 = new Triangle(v1, v3, v4);
+		float[][] t1 = new float[][] { v1, v2, v3 };
+		float[][] t2 = new float[][] { v1, v3, v4 };
 		
 		try 
 		{

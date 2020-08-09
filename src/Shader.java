@@ -18,7 +18,7 @@ import java.awt.image.WritableRaster;
 import java.util.function.Consumer;
 
 /**
- * This class allows for the rendering of a {@link Triangle} using bilinear interpolated shading.
+ * This class allows for the rendering of a vertex array using bilinear interpolated shading.
  * @version Last Edited: August/08/2020
  * @author Sean Rannie
  */
@@ -42,16 +42,16 @@ public class Shader implements Paint, PaintContext
 	
 	/** {@link VertexAttribute} that is used by shader */
 	private VertexAttribute attribute;
-	/** Copy of the {@link Triangle}'s first vertex array */
+	/** Copy of the vertex array's first vertex array */
 	private float[] vs;
-	/** Array of final x values used to draw the {@link Triangle} */
+	/** Array of final x values used to draw the vertex array */
 	private int[] xs = new int[3];
-	/** Array of final y values used to draw the {@link Triangle} */
+	/** Array of final y values used to draw the vertex array */
 	private int[] ys = new int[3];
 	
-	/** Vector between the first and second vertices of the {@link Triangle} */
+	/** Vector between the first and second vertices of the vertex array */
 	private float[] svec;
-	/** Vector between the first and third vertices of the {@link Triangle} */
+	/** Vector between the first and third vertices of the vertex array */
 	private float[] tvec;
 	/** Holds the interpolated value between vertices, which is passed to the fragment shader */
 	private float[] interpolated;
@@ -133,26 +133,26 @@ public class Shader implements Paint, PaintContext
 	}
 	
 	/**
-	 * Renders a {@link Triangle} using this {@link Shader}.
+	 * Renders a vertex array using this {@link Shader}.
 	 * @param gl reference to {@link Graphics2D} 
-	 * @param tri
+	 * @param vertexArray array of vertices
 	 */
-	public void render(Graphics2D gl, Triangle tri)
+	public void render(Graphics2D gl, float[][] vertexArray)
 	{
 		// Apply vertex shader
-		for(int i = 0; i < tri.v.length; i++)
+		for(int i = 0; i < vertexArray.length; i++)
 		{
-			vertexShader.accept(tri.v[i]);
+			vertexShader.accept(vertexArray[i]);
 			xs[i] = Math.round(GL_X * width);
 			ys[i] = Math.round(GL_Y * height);
 		}
 		
 		// Calculate vectors between vertices
-		vs = tri.v[0];
+		vs = vertexArray[0];
 		for(int i = 0; i < attribute.size; i++)
 		{
-			svec[i] = tri.v[1][i] - vs[i];
-			tvec[i] = tri.v[2][i] - vs[i];
+			svec[i] = vertexArray[1][i] - vs[i];
+			tvec[i] = vertexArray[2][i] - vs[i];
 		}
 		
 		t_invY = 1.0f / tvec[1];
@@ -161,11 +161,11 @@ public class Shader implements Paint, PaintContext
 		
 		// Render the triangle
 		gl.setPaint( this );
-		gl.fillPolygon(xs, ys, 3);
+		gl.fillPolygon(xs, ys, vertexArray.length);
 	}
 
 	/**
-	 * Applies fragment shading to currently rendered {@link Triangle}. The {@link Raster} is always requested in horizontal strips. 
+	 * Applies fragment shading to currently rendered vertex array. The {@link Raster} is always requested in horizontal strips. 
 	 * Instead of returning a new {@link Raster} each time, the function returns the same {@link Raster} with the contents of the buffer modified.
 	 * @param x offset along horizontal axis
 	 * @param y offset along vertical axis
