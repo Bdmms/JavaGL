@@ -30,7 +30,6 @@ public class Shader implements Paint, PaintContext
 	private ColorModel cm;
 	/** Buffer that is used when rending raster strips */
 	private byte[] buffer;
-	
 	/** Horizontal resolution of the rendering area */
 	private int width;
 	/** Vertical resolution of the rendering area */
@@ -45,9 +44,9 @@ public class Shader implements Paint, PaintContext
 	/** Copy of the vertex array's first vertex array */
 	private float[] vs;
 	/** Array of final x values used to draw the vertex array */
-	private int[] xs = new int[3];
+	private int[] xs;
 	/** Array of final y values used to draw the vertex array */
-	private int[] ys = new int[3];
+	private int[] ys;
 	
 	/** Vector between the first and second vertices of the vertex array */
 	private float[] svec;
@@ -130,6 +129,9 @@ public class Shader implements Paint, PaintContext
 		svec = new float[attribute.size];
 		tvec = new float[attribute.size];
 		interpolated = new float[attribute.size];
+		
+		xs = new int[attribute.shape];
+		ys = new int[attribute.shape];
 	}
 	
 	/**
@@ -140,7 +142,7 @@ public class Shader implements Paint, PaintContext
 	public void render(Graphics2D gl, float[][] vertexArray)
 	{
 		// Apply vertex shader
-		for(int i = 0; i < vertexArray.length; i++)
+		for(int i = 0; i < attribute.shape; i++)
 		{
 			vertexShader.accept(vertexArray[i]);
 			xs[i] = Math.round(GL_X * width);
@@ -161,9 +163,11 @@ public class Shader implements Paint, PaintContext
 		
 		// Render the triangle
 		gl.setPaint( this );
-		gl.fillPolygon(xs, ys, vertexArray.length);
+		gl.fillPolygon(xs, ys, attribute.shape);
 	}
 
+	private float[] cvec = new float[8];
+	
 	/**
 	 * Applies fragment shading to currently rendered vertex array. The {@link Raster} is always requested in horizontal strips. 
 	 * Instead of returning a new {@link Raster} each time, the function returns the same {@link Raster} with the contents of the buffer modified.
@@ -175,24 +179,33 @@ public class Shader implements Paint, PaintContext
 	@Override
 	public Raster getRaster(int x, int y, int w, int h) 
 	{
-		float vx = ((float) x * w_scale) - vs[0];
-		float vy = ((float) y * h_scale) - vs[1];
-		w *= 3;
+		float vyt = (float) y * h_scale - vs[1];
+		float vxs = ( ( (float) x * w_scale - vs[0] - vyt * t_ratio) * s_factor);
 		
-		for(short px = 0; px < w; vx += w_scale)
+		// Interpolate the vertex data
+		for( h = 0; h < attribute.size; h++)
+			interpolated[h] = vs[h] + vxs * svec[h] + (vyt - vxs * svec[1]) * t_invY * tvec[h];
+		
+		vxs = (w_scale * s_factor);
+		vyt = (vxs * svec[1] * t_invY);
+		
+		for( h = 0; h < attribute.size; h++)
+			cvec[h] = vxs * svec[h] - vyt * tvec[h];
+		
+		w *= 3;
+		x = 0;
+		
+		// Increment variables for the remainder of the strip
+		while(x < w)
 		{
-			float s = (vx - vy * t_ratio) * s_factor;
-			float t = (vy - s * svec[1]) * t_invY;
-			
-			// Interpolate the vertex data
-			for(byte i = 0; i < attribute.size; i++)
-				interpolated[i] = vs[i] + s * svec[i] + t * tvec[i];
-
 			// Apply fragment shader at coordinates
 			fragmentShader.accept( interpolated );
-			buffer[px++] = GL_B;
-			buffer[px++] = GL_G;
-			buffer[px++] = GL_R;
+			buffer[x++] = GL_B;
+			buffer[x++] = GL_G;
+			buffer[x++] = GL_R;
+			
+			for( y = 0; y < attribute.size; y++)
+				interpolated[y] += cvec[y];
 		}
 		
 		return raster;

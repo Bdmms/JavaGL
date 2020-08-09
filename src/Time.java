@@ -1,5 +1,5 @@
 /**
- * This class manages the passing of time between frames
+ * This class manages the passing of time between frames.
  * @version Last Edited: August/08/2020
  * @author Sean Rannie
  */

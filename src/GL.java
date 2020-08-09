@@ -77,7 +77,7 @@ public class GL implements KeyListener
 	 */
 	public void show()
 	{
-		VertexAttribute attribute = new VertexAttribute( 8 );
+		VertexAttribute attribute = new VertexAttribute( 8, 3 );
 		
 		// Shader Configuration
 		shader = new Shader(bounds.width * 3, bounds.width, bounds.height, attribute, 
