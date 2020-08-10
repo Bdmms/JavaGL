@@ -10,9 +10,9 @@ public class Time
 	/** The current frame count of the second */
 	private static int frameCount = 0;
 	/** The time of the last frame */
-	private static long lastFrame = 0;
+	private static long lastFrame = System.nanoTime();
 	/** The time of the current frame */
-	private static long currentFrame = 0;
+	private static long currentFrame = System.nanoTime();
 	/** Time of next frame */
 	private static long nextFrame = System.nanoTime();
 	
@@ -21,12 +21,13 @@ public class Time
 	/** The number of frames counted */
 	public static long globalCount = 0;
 	/** Difference in time from last frame */
-	public static float deltaTime = 1.0f;				
+	public static double deltaTime = 1.0f;				
 	/** Enables VSync */
 	public static boolean vsyncEnabled = false;
 	
 	/**
-	 * Used to pause until the next 60 Hz tick
+	 * Used to pause until the next 60 Hz tick.
+	 * Note: this is an inefficient way of handling this.
 	 */
 	public static void vSync()
 	{
@@ -36,7 +37,7 @@ public class Time
 	}
 	
 	/**
-	 * Calculates time change between frames
+	 * Calculates time difference between frames
 	 */
 	public static void frame()
 	{
@@ -52,7 +53,7 @@ public class Time
  		
  		lastFrame = currentFrame;
  		currentFrame = System.nanoTime();
- 		deltaTime = (float) (currentFrame - lastFrame) / 1000000000;
+ 		deltaTime = (currentFrame - lastFrame) / 1000000000.0;
 		
 		globalCount++;
 		

@@ -14,19 +14,19 @@ public class Texture
 	public final static byte B = 2;
 	public final static byte A = 3;
 	
-	/** Width of the created {@link Texture} */
-	private BinarySize width;
-	/** Height of the created {@link Texture} */
-	private BinarySize height;
+	// | height | width | channel |
 	/** Array that stores the resized copy of the image */
-	private short[][] buffer;
+	public float[] buffer;
+	
+	public float widthSize;
+	public float heightSize;
+	public int widthMask;
+	public int heightMask;
 	
 	/** Creates an empty {@link Texture} */
 	public Texture()
 	{
-		width = BinarySize.x1;
-		height = BinarySize.x1;
-		buffer = new short[width.size * height.size][NUM_CHANNELS];
+		setSize(BinarySize.x1, BinarySize.x1);
 	}
 	
 	/** 
@@ -36,37 +36,50 @@ public class Texture
 	public Texture(BufferedImage image)
 	{
 		// Find the closest matching dimensions
-		width = BinarySize.closestMatch( image.getWidth() );
-		height = BinarySize.closestMatch( image.getHeight() );
-		buffer = new short[width.size * height.size][NUM_CHANNELS];
+		BinarySize width = BinarySize.closestMatch( image.getWidth() );
+		BinarySize height = BinarySize.closestMatch( image.getHeight() );
+		setSize( width, height );
 		
 		// Resize the image to fit within a BinarySize texture
 		for(int y = 0; y < height.size; y++)
 		{
 			for(int x = 0; x < width.size; x++)
 			{
-				float xf = (float) x / width.size;
-				float yf = (float) y / height.size;
+				float xf = x / width.fsize;
+				float yf = y / height.fsize;
 				int color = image.getRGB(Math.round(xf * image.getWidth()), Math.round(yf * image.getHeight()));
-				short[] pixel = buffer[x | (y << width.bits)];
-				pixel[A] = (short) ((color >> 24) & 0xFF);
-				pixel[R] = (short) ((color >> 16) & 0xFF);
-				pixel[G] = (short) ((color >>  8) & 0xFF);
-				pixel[B] = (short) ((color) & 0xFF);
+				int i = (x<<2) | ((y<<2) << width.bits);
+				buffer[i + A] = ((color >> 24) & 0xFF);
+				buffer[i + R] = ((color >> 16) & 0xFF);
+				buffer[i + G] = ((color >>  8) & 0xFF);
+				buffer[i + B] = ( color & 0xFF);
 			}
 		}
 	}
 	
 	/**
-	 * Returns the RGBA array value stored at a floating-point x-y coordinate.
+	 * Sets the size of the texture
+	 * @param w binary friendly width
+	 * @param h binary friendly height
+	 */
+	private void setSize(BinarySize w, BinarySize h)
+	{
+		buffer = new float[w.size * h.size * NUM_CHANNELS];
+		widthSize = w.fsize * 4;
+		widthMask = w.max << 2;
+		heightSize = w.fsize * h.fsize * 4;
+		heightMask = (h.max << (w.bits + 2));
+	}
+	
+	/**
+	 * Returns starting index of the pixel using a floating-point x-y coordinate.
 	 * @param x horizontal component
 	 * @param y vertical component
-	 * @return RGBA 4-channel integer array stored at the coordinates
+	 * @return integer index of the pixel's first channel
 	 */
-	public short[] texture(float x, float y)
+	public int texture(float x, float y)
 	{
-		return buffer[(Math.round(x * width.size) & width.max) | 
-		              ((Math.round(y * height.size) & height.max) << width.bits)];
+		return ( (int)( x * widthSize ) & widthMask ) | ( (int)( y * heightSize ) & heightMask );
 	}
 	
 	/**
@@ -95,6 +108,8 @@ public class Texture
 		
 		/** The size of the given value. */
 		public int size;
+		/** The size of the given value in floating precision. */
+		public float fsize;
 		/** The maximum value that will be less than size. Always equal to size - 1. */
 		public int max;
 		/** Number of bits required to iterate through an array of this size */
@@ -105,6 +120,7 @@ public class Texture
 		{
 			this.bits = bits;
 			size = 1 << bits;
+			fsize = size;
 			max = size - 1;
 		}
 		

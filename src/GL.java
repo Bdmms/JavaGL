@@ -50,6 +50,9 @@ public class GL implements KeyListener
 		GraphicsConfiguration gc = GraphicsEnvironment.getLocalGraphicsEnvironment().getScreenDevices()[0].getConfigurations()[0];
 		bounds = GraphicsEnvironment.getLocalGraphicsEnvironment().getScreenDevices()[0].getConfigurations()[0].getBounds();
 		
+		//bounds.width /= 2;
+		//bounds.height /= 2;
+		
 		// Frame Configuration
 		frame = new Frame(gc);
 		frame.setSize(100, 100);
@@ -77,28 +80,44 @@ public class GL implements KeyListener
 	 */
 	public void show()
 	{
-		VertexAttribute attribute = new VertexAttribute( 8, 3 );
+		// Attribute tells shader what to expect as input and output
+		ShaderProperty attribute = new ShaderProperty( 8, 3, 3 );
 		
 		// Shader Configuration
-		shader = new Shader(bounds.width * 3, bounds.width, bounds.height, attribute, 
-				(vertex)-> {
-					shader.GL_X = vertex[0];
-					shader.GL_Y = vertex[1];
-					shader.GL_Z = 0.0f;
+		shader = new Shader(bounds.width, bounds.height, attribute, 
+				(in, out)-> {
+					shader.GL_X = in[0];
+					shader.GL_Y = in[1];
+					shader.GL_Z = in[2]; // Depth
+					out[0] = in[3]; // TX
+					out[1] = in[4]; // TY
 				},
 				(fragment)-> {
-					short[] col = shader.texture0.texture(fragment[3], fragment[4]);
-					shader.GL_R = (byte)(col[Texture.R]);
-					shader.GL_G = (byte)(col[Texture.G]);
-					shader.GL_B = (byte)(col[Texture.B]);
+					int i = shader.texture0.texture(fragment[0], fragment[1]);
+					float vx = fragment[0] - 0.5f;
+					float vy = fragment[1] - 0.5f;
+					float dst = (float)Math.sqrt(vx * vx + vy * vy) * 2;
+					
+					if(dst >= 1.0f)
+						return;
+					
+					float lt = 1.0f - dst;
+					shader.depth[shader.GL_INDEX] = shader.GL_DEPTH; 
+					shader.frame[shader.GL_INDEX] = ((byte)(shader.texture0.buffer[i | Texture.R] * lt) << 16) | 
+							 						 ((byte)(shader.texture0.buffer[i | Texture.G] * lt) << 8) | 
+							 						  (byte)(shader.texture0.buffer[i | Texture.B] * lt) ;
 				}
 		);
 		
-		float[] v1 = new float[attribute.size];
-		float[] v2 = new float[attribute.size];
-		float[] v3 = new float[attribute.size];	
-		float[] v4 = new float[attribute.size];	
+		float[] v1 = new float[8];
+		float[] v2 = new float[8];
+		float[] v3 = new float[8];	
+		float[] v4 = new float[8];	
 		
+		v1[2] = 0.1f;
+		v2[2] = 0.1f;
+		v3[2] = 0.2f;
+		v4[2] = 0.1f;
 		v1[3] = 0.0f; v1[4] = 0.0f; v1[5] = 1.0f; v1[6] = 0.0f; v1[7] = 0.0f;
 		v2[3] = 1.0f; v2[4] = 0.0f; v2[5] = 0.0f; v2[6] = 1.0f; v2[7] = 0.0f; 
 		v3[3] = 1.0f; v3[4] = 1.0f; v3[5] = 0.0f; v3[6] = 0.0f; v3[7] = 1.0f;
@@ -113,7 +132,7 @@ public class GL implements KeyListener
 		} 
 		catch (IOException e1) { e1.printStackTrace(); }
 		
-		float timer = 0.0f;
+		double timer = 0.0f;
 		frame.setVisible(true);
 		window.setVisible(true);
 		window.createBufferStrategy(2);
@@ -123,29 +142,41 @@ public class GL implements KeyListener
 		// Render loop
 		while(true) 
 		{
-			v1[0] = 0.5f + aspectRatio * 0.25f * (float)Math.cos( timer + Math.PI * 0.5 );
-			v2[0] = 0.5f + aspectRatio * 0.25f * (float)Math.cos( timer );
-			v3[0] = 0.5f + aspectRatio * 0.25f * (float)Math.cos( timer - Math.PI * 0.5 );
-			v4[0] = 0.5f + aspectRatio * 0.25f * (float)Math.cos( timer + Math.PI );
-			
+			// Update vertex position
+			v1[0] = 0.55f + aspectRatio * 0.25f * (float)Math.cos( timer + Math.PI * 0.5 );
+			v2[0] = 0.55f + aspectRatio * 0.25f * (float)Math.cos( timer );
+			v3[0] = 0.55f + aspectRatio * 0.25f * (float)Math.cos( timer - Math.PI * 0.5 );
+			v4[0] = 0.55f + aspectRatio * 0.25f * (float)Math.cos( timer + Math.PI );
 			v1[1] = 0.5f + 0.25f * (float)Math.sin( timer + Math.PI * 0.5 );
 			v2[1] = 0.5f + 0.25f * (float)Math.sin( timer );
 			v3[1] = 0.5f + 0.25f * (float)Math.sin( timer - Math.PI * 0.5 );
 			v4[1] = 0.5f + 0.25f * (float)Math.sin( timer - Math.PI );
 			
+			// Get graphics
 			Graphics2D gl = (Graphics2D)strategy.getDrawGraphics();
-			
         	gl.setColor(Color.BLACK);
         	gl.fillRect(0, 0, bounds.width, bounds.height);
+        	
+        	// Render triangles
+        	shader.clearDepth();
+        	shader.render(gl, t1);
+        	shader.render(gl, t2);
+        	
+        	v1[0] -= 0.1f; 
+        	v2[0] -= 0.1f; 
+        	v3[0] -= 0.1f; 
+        	v4[0] -= 0.1f;
+        	
         	shader.render(gl, t1);
         	shader.render(gl, t2);
 			
+        	// Show FPS
         	gl.setColor(Color.WHITE);
         	gl.drawString("FPS: " + Time.frameRate, 5, 20);
 			strategy.show();
 			
-			timer += 0.01f;
 			Time.frame();
+			timer += Time.deltaTime;
 		}
 	}
 	

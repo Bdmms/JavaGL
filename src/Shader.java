@@ -4,17 +4,15 @@ import java.awt.PaintContext;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.Transparency;
-import java.awt.color.ColorSpace;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Rectangle2D;
 import java.awt.image.ColorModel;
-import java.awt.image.ComponentColorModel;
-import java.awt.image.DataBuffer;
-import java.awt.image.DataBufferByte;
-import java.awt.image.PixelInterleavedSampleModel;
+import java.awt.image.DataBufferInt;
+import java.awt.image.DirectColorModel;
 import java.awt.image.Raster;
 import java.awt.image.SampleModel;
 import java.awt.image.WritableRaster;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 /**
@@ -24,12 +22,20 @@ import java.util.function.Consumer;
  */
 public class Shader implements Paint, PaintContext
 {
+	public static final int R = 2;
+	public static final int G = 1;
+	public static final int B = 0;
+	
 	/** {@link Raster} that gets passed between the Graphics2D component */
 	private WritableRaster raster;
 	/** {@link ColorModel} used by the shader */
 	private ColorModel cm;
+	/** Depth Buffer used by the shader */
+	public float[] depth;
+	/** A copy of the rendered screen */
+	public int[] frame;
 	/** Buffer that is used when rending raster strips */
-	private byte[] buffer;
+	private int[] buffer;
 	/** Horizontal resolution of the rendering area */
 	private int width;
 	/** Vertical resolution of the rendering area */
@@ -39,8 +45,16 @@ public class Shader implements Paint, PaintContext
 	/** Height of a pixel relative to the total height (1 / eight) */
 	private float h_scale;
 	
-	/** {@link VertexAttribute} that is used by shader */
-	private VertexAttribute attribute;
+	/** {@link ShaderProperty} that is used by shader */
+	private ShaderProperty attribute;
+	/** Stores final x position of vertex for later */
+	private float[] XPos;
+	/** Stores final y position of vertex for later */
+	private float[] YPos;
+	/** Stores final z position of vertex for later */
+	private float[] ZPos;
+	/** Stores result of vertex shader */
+	private float[][] vertexOut;
 	/** Copy of the vertex array's first vertex array */
 	private float[] vs;
 	/** Array of final x values used to draw the vertex array */
@@ -52,8 +66,14 @@ public class Shader implements Paint, PaintContext
 	private float[] svec;
 	/** Vector between the first and third vertices of the vertex array */
 	private float[] tvec;
+	/** Cached vector used when rendering stripes */
+	private float[] cache_vec;
 	/** Holds the interpolated value between vertices, which is passed to the fragment shader */
-	private float[] interpolated;
+	public float[] interpolated;
+	
+	private float dsvec;
+	private float dtvec;
+	private float dcvec;
 	
 	/** Pre-calculated value of the reciprocal of the t vector's y component (1 / tvec[1])*/
 	private float t_invY = 0.0f;
@@ -61,47 +81,47 @@ public class Shader implements Paint, PaintContext
 	private float t_ratio = 0.0f;
 	/** Pre-calculated value of the s vector with respects to the t vector (1.0f / (svec[0] - svec[1] * t_ratio))*/
 	private float s_factor = 0.0f;
+	/** Pre-calculated y component of s vector */
+	private float svecy = 0.0f;
 	
 	/** Vertex Shader that is applied to each vertex */
-	private Consumer<float[]> vertexShader;
+	private BiConsumer<float[], float[]> vertexShader;
 	/** Fragment Shader that is applied for every rendered pixel */
 	private Consumer<float[]> fragmentShader;
 	
 	/** {@link Texture} that is currently binded */
 	public Texture texture0 = new Texture();
+	
+	public int GL_INDEX = 0;
 	/** Returned X-component of vertex shader */
 	public float GL_X = 0.0f;
 	/** Returned Y-component of vertex shader */
 	public float GL_Y = 0.0f;
 	/** Returned Z-component of vertex shader */
 	public float GL_Z = 0.0f;
-	/** Returned red of fragment shader */
-	public byte GL_R = 0x00;
-	/** Returned green of fragment shader */
-	public byte GL_G = 0x00;
-	/** Returned blue of fragment shader */
-	public byte GL_B = 0x00;
+	public float GL_DEPTH = 0.0f;
 	
 	/**
 	 * Sets the resolution and shading functions used by the {@link Shader}.
-	 * @param bufferSize size of the buffer used by the raster strips (screen width is recommended)
 	 * @param w horizontal resolution of the screen
 	 * @param h vertical resolution of the screen
-	 * @param atr {@link VertexAttribute} that defines the vertex structure
+	 * @param property {@link ShaderProperty} that defines the vertex structure
 	 * @param vShader {@link Consumer} that is used as the vertex shader
 	 * @param fShader {@link Consumer} that is used as the fragment shader
 	 */
-	public Shader(int bufferSize, int w, int h, VertexAttribute atr, Consumer<float[]> vShader, Consumer<float[]> fShader)
+	public Shader(int w, int h, ShaderProperty property, BiConsumer<float[], float[]> vShader, Consumer<float[]> fShader)
 	{
-		buffer = new byte[bufferSize * 4];
+		buffer = new int[w];
+		depth = new float[w * h];
+		frame = new int[w * h];
 		
-		DataBufferByte dataBuffer = new DataBufferByte(buffer, buffer.length);
-		cm = new ComponentColorModel(ColorSpace.getInstance(ColorSpace.CS_LINEAR_RGB), false, true, ColorModel.OPAQUE, DataBuffer.TYPE_BYTE);
-		SampleModel sm = new PixelInterleavedSampleModel(DataBuffer.TYPE_BYTE, w, 1, 3, bufferSize, new int[] { 2, 1, 0 } );
+		DataBufferInt dataBuffer = new DataBufferInt(buffer, buffer.length);
+		cm = new DirectColorModel(24, 0xFF0000, 0xFF00, 0xFF);
+		SampleModel sm = cm.createCompatibleSampleModel(w, 1);
 		raster = Raster.createWritableRaster(sm, dataBuffer, null);
 		
 		setResolution( w, h );
-		setVertexAttribute( atr );
+		setProperty( property );
 		vertexShader = vShader;
 		fragmentShader = fShader;
 	}
@@ -120,18 +140,32 @@ public class Shader implements Paint, PaintContext
 	}
 	
 	/**
-	 * Sets the {@link VertexAttribute} to be used by the {@link Shader}.
-	 * @param atr {@link VertexAttribute} that defines the vertex structure
+	 * Sets the {@link ShaderProperty} to be used by the {@link Shader}.
+	 * @param atr {@link ShaderProperty} that defines the vertex structure
 	 */
-	public void setVertexAttribute(VertexAttribute atr)
+	public void setProperty(ShaderProperty atr)
 	{
 		attribute = atr;
-		svec = new float[attribute.size];
-		tvec = new float[attribute.size];
-		interpolated = new float[attribute.size];
-		
-		xs = new int[attribute.shape];
-		ys = new int[attribute.shape];
+
+		xs = new int[attribute.numVertex];
+		ys = new int[attribute.numVertex];
+		XPos = new float[attribute.numVertex];
+		YPos = new float[attribute.numVertex];
+		ZPos = new float[attribute.numVertex];
+		svec = new float[attribute.outputSize];
+		tvec = new float[attribute.outputSize];
+		cache_vec = new float[attribute.outputSize];
+		interpolated = new float[attribute.outputSize];
+		vertexOut = new float[attribute.numVertex][attribute.outputSize];
+	}
+	
+	public void clearDepth()
+	{
+		for(int i = 0; i < depth.length; i++)
+		{
+			frame[i] = 0;
+			depth[i] = 0.0f;
+		}
 	}
 	
 	/**
@@ -139,35 +173,44 @@ public class Shader implements Paint, PaintContext
 	 * @param gl reference to {@link Graphics2D} 
 	 * @param vertexArray array of vertices
 	 */
-	public void render(Graphics2D gl, float[][] vertexArray)
+	public void render(Graphics2D gl, float[][] vertexIn)
 	{
 		// Apply vertex shader
-		for(int i = 0; i < attribute.shape; i++)
+		for(int i = 0; i < attribute.numVertex; i++)
 		{
-			vertexShader.accept(vertexArray[i]);
+			vertexShader.accept(vertexIn[i], vertexOut[i]);
+			XPos[i] = GL_X;
+			YPos[i] = GL_Y;
+			ZPos[i] = GL_Z;
 			xs[i] = Math.round(GL_X * width);
 			ys[i] = Math.round(GL_Y * height);
 		}
 		
 		// Calculate vectors between vertices
-		vs = vertexArray[0];
-		for(int i = 0; i < attribute.size; i++)
+		vs = vertexOut[0];
+		for(int i = 0; i < attribute.outputSize; i++)
 		{
-			svec[i] = vertexArray[1][i] - vs[i];
-			tvec[i] = vertexArray[2][i] - vs[i];
+			svec[i] = vertexOut[1][i] - vs[i];
+			tvec[i] = vertexOut[2][i] - vs[i];
 		}
+		dsvec = ZPos[1] - ZPos[0];
+		dtvec = ZPos[2] - ZPos[0];
 		
-		t_invY = 1.0f / tvec[1];
-		t_ratio = tvec[0] * t_invY;
-		s_factor = 1.0f / (svec[0] - svec[1] * t_ratio);
+		svecy = YPos[1] - YPos[0];
+		t_invY = 1.0f / (YPos[2] - YPos[0]);
+		t_ratio = (XPos[2] - XPos[0]) * t_invY;
+		s_factor = 1.0f / ((XPos[1] - XPos[0]) - svecy * t_ratio);
+		
+		// Update cached interpolation vector
+		for(int i = 0; i < attribute.outputSize; i++)
+			cache_vec[i] = (svec[i] - svecy * t_invY * tvec[i]) * w_scale * s_factor;
+		dcvec = (dsvec - svecy * t_invY * dtvec) * w_scale * s_factor;
 		
 		// Render the triangle
 		gl.setPaint( this );
-		gl.fillPolygon(xs, ys, attribute.shape);
+		gl.fillPolygon(xs, ys, attribute.numVertex);
 	}
 
-	private float[] cvec = new float[8];
-	
 	/**
 	 * Applies fragment shading to currently rendered vertex array. The {@link Raster} is always requested in horizontal strips. 
 	 * Instead of returning a new {@link Raster} each time, the function returns the same {@link Raster} with the contents of the buffer modified.
@@ -179,33 +222,28 @@ public class Shader implements Paint, PaintContext
 	@Override
 	public Raster getRaster(int x, int y, int w, int h) 
 	{
-		float vyt = (float) y * h_scale - vs[1];
-		float vxs = ( ( (float) x * w_scale - vs[0] - vyt * t_ratio) * s_factor);
+		GL_INDEX = x + y * width;
+		float vyt = y * h_scale - YPos[0];
+		float vxs = ( ( x * w_scale - XPos[0] - vyt * t_ratio) * s_factor);
+		vyt = (vyt - vxs * svecy) * t_invY;
 		
 		// Interpolate the vertex data
-		for( h = 0; h < attribute.size; h++)
-			interpolated[h] = vs[h] + vxs * svec[h] + (vyt - vxs * svec[1]) * t_invY * tvec[h];
-		
-		vxs = (w_scale * s_factor);
-		vyt = (vxs * svec[1] * t_invY);
-		
-		for( h = 0; h < attribute.size; h++)
-			cvec[h] = vxs * svec[h] - vyt * tvec[h];
-		
-		w *= 3;
-		x = 0;
+		for( y = 0; y < attribute.outputSize; y++)
+			interpolated[y] = vs[y] + vxs * svec[y] + vyt * tvec[y] - cache_vec[y];
+		GL_DEPTH = ZPos[0] + vxs * dsvec + vyt * dtvec - dcvec;
 		
 		// Increment variables for the remainder of the strip
-		while(x < w)
+		for( x = 0; x < w; x++, GL_INDEX++ )
 		{
-			// Apply fragment shader at coordinates
-			fragmentShader.accept( interpolated );
-			buffer[x++] = GL_B;
-			buffer[x++] = GL_G;
-			buffer[x++] = GL_R;
+			for( y = 0; y < attribute.outputSize; y++)
+				interpolated[y] += cache_vec[y];
+			GL_DEPTH += dcvec;
 			
-			for( y = 0; y < attribute.size; y++)
-				interpolated[y] += cvec[y];
+			// Check depth buffer and apply fragment shader at coordinates
+			if(depth[GL_INDEX] < GL_DEPTH)
+				fragmentShader.accept( interpolated );
+			
+			buffer[x] = frame[GL_INDEX];
 		}
 		
 		return raster;
